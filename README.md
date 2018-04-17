@@ -1,2 +1,3 @@
 # Chems-R-Us
-Lab 10 Group Project for IDM
+Lab 10 Group Project for Intro to Data Mathematics
+CHEMS classification mini-project
