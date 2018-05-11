@@ -1,0 +1,512 @@
+---
+title: 'Weesnaw:  Predicting Biodegradability'
+output:
+  pdf_document:
+    toc: yes
+  html_notebook:
+    theme: united
+    toc: yes
+  html_document:
+    df_print: paged
+    header-includes: \usepackage{color}
+    toc: yes
+---
+
+# 1.0 Report Background
+
+This report was prepared for ChemsRUs by
+your company name.
+Consultants: 
+
+   Madison Chamberlain 
+   Ramin Chowdhury
+   Sebastian Castillo
+   Tenzin Tashi
+   
+This report includes all the R-code necessary to produce the results describe in this report embedded in the report.  Code can be surpressed using the command code using the '{R,  echo=show}  for readability. If show<- FALSE the code will be surpressed.  If show <-TRUE then the code will be show. 
+
+```{r}
+```
+
+
+*NOTE: THAT THIS IS A TEMPLATE FOR THE REPORT WITH INSTRUCTIONS FROM ASSIGNMENTS INCLUDED FOR YOUR CONVENIENCE.  DELETE THE INSTRUCTIONS GIVEN IN ITALICS IN YOUR FINAL REPORT NOTEBOOK. THE NOTEBOOK SHOULD BE AS YOU WOULD GIVE CHEMSRUS. CODE FRAGMENTS ARE PROVIDED.  YOU CAN ADD OR DELETE R CODE BLOCKS AS NECESSARY.  YOU CAN SUPRESS CODE BLOCKS using ```{r include=show} or ```{r echo=show} with show<-TRUE or show<-FALSE as desired.* 
+
+```{r include=FALSE}
+# These will install required packages if they are not already installed
+if (!require("ggplot2")) {
+   install.packages("ggplot2", dependencies = TRUE)
+   library(ggplot2)
+}
+if (!require("knitr")) {
+   install.packages("knitr", dependencies = TRUE)
+   library(knitr)
+}
+if (!require("xtable")) {
+   install.packages("xtable", dependencies = TRUE)
+   library(xtable)
+}
+if (!require("pander")) {
+   install.packages("pander", dependencies = TRUE)
+   library(pander)
+}
+if (!require("ggbiplot")) {
+  install.packages("devtools",dependencies = TRUE )  # also need install ggplot2
+  library("devtools")
+  install_git("git://github.com/vqv/ggbiplot.git",dependencies = TRUE)
+  library("ggbiplot")
+}
+if (!require(reshape2)){
+  install.packages("reshape2", dependencies = TRUE)
+   library(reshape2)
+} 
+if (!require(gridExtra)){
+  install.packages("gridExtra", dependencies = TRUE)
+   library(gridExtra)
+} 
+if (!require(MASS)){
+  install.packages("MASS", dependencies = TRUE)
+   library(MASS)
+} 
+
+library("readr")
+library("base")
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+# 2.0 Introduction 
+
+*An introduction giving an overview of the report.*
+Our firm "Weesnaw" was hired as consultants by Chems-R-Us and started a project to develop a computational model that analyzes and generates the biodegradability of certain molecules. We were given a data set of with molecule data and 1,055 chemicals of biodegradable values. With the data from chemsrus.csv provided to us, we then created a model to predict the biodegradation of chemicals by using molecular data. The data signified where the last column determines whether or not the last column is biodegradable (either 1 or -1). Also, chemstest.csv was given to us to use. However, the biodegradability has not been provided, as the class column was not available unlike the first csv file. Finally, our main task will be to predict the classification of these points using one of these two methods:  the Mean Method or the Fisher Linear Discriminant Analysis (LDA) Method.
+
+
+# 3.0 Data Description
+
+*A basic description of the data.  Describe the size of the data (number of attributes, number of points in each class) in chemrus.csv and chemstest.  Provide the mean for each class of chemrsus t in a heatmap. Give a boxplot to indicate the distribution of the data in each class.  Describe any observations that you have.*
+
+This 'chemsdata.csv' dataset is consisted of 1,055 entries consisting of an id captioning the molecule as well as 41 attributes that the specific molecule has, and finally checking if it is biodegradable or not. After checking the classes, there are 356 biodegradable points and 699 non-biodegradable points. Going into depth and looking at the file, the first column is an ID number , the columns 2 through 42 are the attributes of the molecule, and the last column is either 1 or -1 describing whether the molecule is biodegradable or not. 
+The ‘chemstest.csv’ file that was given to us is a csv file filled with data of molecules explained by the 41 attributes but the biodegradability has not been provided, the class column is empty.
+
+
+
+
+```{r, echo=show}
+# Read in chemsdata.csv
+chemsdata <- read.csv("~/MATP-4400/data/chemsdata.csv")
+chemsdata$class<-as.factor(chemsdata$class)
+
+#head(chemsdata)
+#head(chems_test)
+numcol <- ncol(chemsdata)
+numcol
+#43
+chemsdata <- chemsdata[,-1]
+classes <- chemsdata[,ncol(chemsdata)]
+class_pos <- length(which(classes==1))
+class_pos
+#365
+class_neg <- length(which(classes==-1))
+class_neg
+#699
+
+chemsdata <- chemsdata[,-42]
+my_pca <- prcomp(chemsdata,retx=TRUE,center=FALSE, scale=FALSE)
+heatmap(my_pca$rotation, Rowv = NA, Colv = NA, scale = 'none', main = 'Heatmap of mean of each class'
+        ,cexRow = 0.75, cexCol = 0.75 )
+boxplot(chemsdata, data=class_pos, main="Distribution of data in pos class")
+boxplot(chemsdata, data=class_neg, main="Distibution of data in neg class")
+#Observations:
+#The heatmap shows the means of each class of chemsdata. There seems to be some darker spots
+#in some areas but most of it is uniform.
+#The boxplot shows the distribution of the data in each class (positive and negative)
+
+
+
+
+
+```
+
+# 4.0 Comparison of LDA and the Mean Method.  
+
+*The company is considering saving money by just assigning points to their closest mean of each class.  Show them that your company can do better.  Do a study comparing  Fisher LDA versus the Mean method  where 90\% of the chemsrus.csv data is used for training and 10\% for testing.  Include in your report the normal and threshold of the separating planes from each method (shown as a heatmap), analysis of the training accuracies, analysis of the testing accuracies, and a discussion of which method is preferable.*
+
+The data was randomly divided into a set consisting of 90% training and 10% testing.
+The Fisher LDA model was constructed on the training set.
+```{r, echo=TRUE}
+#Split the chemsdata into training and testing sets 
+#ss will be the number of data in the training set
+ss<- 949
+#Set random seed to ensure reproducibility
+set.seed(300)
+train <- sample(1:nrow(chemsdata),ss)
+
+#The first column is just the sample label, we can discard it for statics 
+#(This is the -1 in the second position)
+chemstrain <- chemsdata[train , -1]  #The training data is just the training rows
+chemstest <- chemsdata[-train, -1 ]  # Using -train gives us all rows except the training rows.
+#The last column is the class label, which is 1 or -1, we can split it off as the class
+trainclass <- chemstrain[, ncol(chemstrain)] 
+testclass <- chemstest[,ncol(chemstest)]
+
+head(chemsdata)
+
+#We leave off the last column (the class label) to get the matrices of features
+trainmatrix <- as.matrix(chemstrain[ ,c(1:ncol(chemstrain)-1)])
+testmatrix <- as.matrix(chemstest[ ,c(1:ncol(chemstest)-1)])
+
+dim(trainmatrix)
+dim(chemstrain)
+```
+
+```{r, echo=TRUE}
+# The Fisher LDA command is as follows
+# The classification column in chemstrain is called "class" which is used in the first argument. 
+# The forumula  class ~ . means predict the class using all the data .
+#  See formula for more options on specifying a formula.
+# The "prior" option specifies weighting between classes. This uses (1/2,1/2).  The default weights by class size.
+lda.fit <- lda(class ~ .,chemstrain,prior=c(1,1)/2)
+#This returns the results in lda.fit. This contains lda.fit$scaling which is the vector normal to the separating hyperplane.It also returns lda.fit$means which are the means of the two different classes.
+
+#Calculate the LDA threshold from the means and the normal vector.
+thresh <- ((lda.fit$means[1,] +lda.fit$means[2,])/2)%*%lda.fit$scaling
+
+#Compute the scalar projections of each class on the separating hyperplane.
+projtrain1 <- trainmatrix%*%as.matrix(lda.fit$scaling)
+pplustrain1  <- projtrain1[trainclass[ ]==1] #All the class 1 projections
+pminustrain1 <- projtrain1[trainclass[ ]==-1] #All the class -1 projections
+
+#Perform the mean method
+y <- trainclass
+Cplus <- trainmatrix[y==1,]
+Cneg <- trainmatrix[y==-1,]
+Mplus <- as.matrix(colMeans(Cplus))
+Mneg <- as.matrix(colMeans(Cneg))
+w <- (Mplus - Mneg)/norm(Mplus - Mneg, type = c("2"))
+P <- (Mplus + Mneg)/2
+t <- as.numeric(t(P) %*% w)
+
+countPlus <- sum((Cplus %*% w) > t)
+countNeg <- sum((Cneg %*% w) < t)
+
+percentPlus <- countPlus / nrow(Cplus)
+percentNeg <- countNeg / nrow(Cneg)
+
+percentPlus
+percentNeg
+
+projtrain2 <- trainmatrix%*%w
+pplustrain2 <-proj2[trainclass[ ]==1]
+pminustrain2 <-proj2[trainclass[ ]==-1]
+
+#Calculate the percentage of points classified correctly
+countPlustr1 <- sum((Cplus %*% lda.fit$scaling) > as.numeric(thresh))
+countNegtr1 <- sum((Cneg %*% lda.fit$scaling) < as.numeric(thresh))
+
+#percentage lda classifies correctly
+percentPlustr1 <- 100*countPlustr1 / nrow(Cplus)
+percentNegtr1 <- 100*countNegtr1 / nrow(Cneg)
+
+
+countPlustr2 <- sum((Cplus %*% w) > t)
+countNegtr2 <- sum((Cneg %*% w) < t)
+
+#percentage the mean method classifies correctly
+percentPlustr2 <- 100*countPlustr2 / nrow(Cplus)
+percentNegtr2 <- 100*countNegtr2 / nrow(Cneg)
+```
+
+```{r, echo=show}
+#Do the same as above except for the testing data
+y2 <- testclass
+Cplus2 <- testmatrix[y2==1,]
+Cneg2 <- testmatrix[y2==-1,]
+Mplus2 <- as.matrix(colMeans(Cplus2))
+Mneg2 <- as.matrix(colMeans(Cneg2))
+w2 <- (Mplus2 - Mneg2)/norm((Mplus2 - Mneg2), type="2")
+P2 <- (Mplus2 + Mneg2)/2
+t2 <- as.numeric(t(P2) %*% w2)
+
+
+#Calculate the percentage of points classified correctly
+countPluste1 <- sum((Cplus2 %*% lda.fit$scaling) > as.numeric(thresh))
+countNegte1 <- sum((Cneg2 %*% lda.fit$scaling) < as.numeric(thresh))
+
+#percentage lda classifies correctly
+percentPluste1 <- 100*countPluste1 / nrow(Cplus2)
+percentNegte1 <- 100*countNegte1 / nrow(Cneg2)
+
+
+countPluste2 <- sum((Cplus2 %*% w2) > t2)
+countNegte2 <- sum((Cneg2 %*% w2) < t2)
+
+#percentage the mean method classifies correctly
+percentPluste2 <- 100*countPluste2 / nrow(Cplus2)
+percentNegte2 <- 100*countNegte2 / nrow(Cneg2)
+
+projtest1 <- testmatrix%*%as.matrix(lda.fit$scaling)
+pplustest1  <- projtest1[testclass[ ]==1] #All the class 1 projections
+pminustest1 <- projtest1[testclass[ ]==-1] #All the class -1 projections
+
+projtest2 <- testmatrix%*%w2
+pplustest2 <-proj2[testclass[ ]==1]
+pminustest2 <-proj2[testclass[ ]==-1]
+```
+
+The fit obtained on the training data is illustrated using the following histograms showing the scalar projections of each class and the separating hyperplane.  
+```{r, echo=show}
+# echo=FALSE lets you add a plot without showing code
+#Function to plot a pair of histograms and a threshold
+histopair <-function(pminus,pplus,thresh,yy=c(0,60),label2="Plus",label1="Minus", bwid) {
+  require(ggplot2); require(gridExtra)
+  hist1 <- ggplot(as.data.frame(pminus), aes(pminus)) + 
+           geom_histogram(col="blue",fill="blue", binwidth=bwid) +
+           ggtitle('Scalar Projections')
+  hist2 <- ggplot(as.data.frame(pplus),  aes(pplus))  + 
+           geom_histogram(col="red",fill="red", binwidth=bwid)
+  df <- data.frame(x1=c(thresh,thresh),y1=c(yy[1],yy[2]))
+  pmin <- min(pminus,pplus)
+  pmax<- max(pminus,pplus)
+  me1 <- hist1 + expand_limits(x=c(pmin,pmax)) +  
+         geom_line(data=df,aes(x=x1,y=y1)) + xlab(label1)
+  me2 <- hist2 + expand_limits(x=c(pmin,pmax)) +
+         geom_line(data=df,aes(x=x1,y=y1)) + xlab(label2)
+  pl <- vector("list",2)
+  pl[[1]] <- me1;  pl[[2]]<-me2;
+  grid.arrange(grobs=pl,ncols=1)
+}
+```
+
+```{r, echo=TRUE}
+row1 <- t(matrix(c(w,t)))
+row2 <- t(matrix(c(lda.fit$scaling,thresh)))
+thresholds <- matrix(c(row1,row2),ncol=length(row1))
+
+heatmap(thresholds, Rowv=NA, Colv=NA, scale="none")
+
+#Using the histopair command defined above make histogram plots of the training data
+histopair(pminustrain1,pplustrain1,thresh,label1="Not Readily Biodegradable",
+          label2="Readily Biodegradable", bwid=0.3) 
+
+histopair(pminustrain2,pplustrain2,t,label1="Not Readily Biodegradable",
+          label2="Readily Biodegradable", bwid=1)
+
+"lda correct classification percent on positive and negative training data"
+percentPlustr1
+percentNegtr1
+
+"mean method correct classification percent on positive and negative training data"
+percentPlustr2
+percentNegtr2
+
+"The first histogram shows the scalar projections of the lda classifications and the second is of the mean method classifications. It is clear to see that the lda method is much better at classifying points properly (86% >> 69% and 86.5% >> 63%)"
+
+#Using the histopair command defined above make histogram plots of the testing data
+histopair(pminustest1,pplustest1,thresh,label1="Not Readily Biodegradable",
+          label2="Readily Biodegradable", bwid=0.3) 
+
+histopair(pminustest2,pplustest2,t,label1="Not Readily Biodegradable",
+          label2="Readily Biodegradable", bwid=1)
+
+"lda correct classification percent on positive and negative testing data"
+percentPluste1
+percentNegte1
+
+"mean method correct classification percent on positive and negative testing data"
+percentPluste2
+percentNegte2
+
+"We have a similar result for the testing data (75.75% >> 63.6% and 84.9% >> 69.8%)"
+```
+
+# 5.0 Model Improvements (OPTIONAL EXTRA CREDIT)
+
+*Put any extra credit work done to try to make a better predictive model here (Uuse your imagination, extra credit for creativity here).*
+
+"We tried a few different methods, but could not find something that worked as expected.
+Some of the methods we tried were to iteratively update the normal vector when we found a point misclassified. The idea was to increase 
+the w vector when we found a positive point classified negative, and vice-versa. We would iterate over all the points numerous times in an attempt 
+for the changes in w to converge to a more accurate model.
+Another idea we had was to perform a pca and observe which components are well seperated. We then run lda on different combinations (eg: PC1 vs PC2) and weight it depending on seperation and percent variance covered, then over all the combinations we chose, create a new w vector created from these weighted components. The idea here is to have the vector be influenced mostly by the well seperated components"
+
+
+
+# 6.0 Suggested Predicted Model
+
+*Describe the predictive  model you suggest for predicting ready biodegradability of new compounds. This could be any of the models that you have made in
+the previous sections.   Describe the process you use to make the model.  Specify the  model in full detail visbily in the report.   For Fisher or other linear models  this is done by specifying the hyperplane normal and threshold.  If you do some other type of model, please provide an appropriate equation, description, and R code for the final model.*
+
+## 6.1 Performance of Model
+
+*Report how well your model does on the chemsrus.csv data in terms of class 1 accuracy, class -1 accuracy, and total accuracy.*
+
+```{r, echo=show}
+#########################################################################
+#Find out how well the calculated hyperplane clasifies the training data
+#The predict command understands the structure returned by lda and creates a list of classes predicted for the second argument
+#In this case, we see how well we did with the training data
+# $class contains the predicted lables 
+train.pred <- predict(lda.fit,chemstrain)$class
+
+# Table command counts the predict versus the actual labels for the training data. The result is stored in a confusion matrix
+confusion.matrix<-table(train.pred,trainclass)
+```
+The predictions on the training data were as follows:
+```{r, results="asis"}
+# kable formats a table to look nice in notebook
+kable(confusion.matrix, type="html",digits = 2, caption="Predicted versus Actual Class")
+```
+
+```{r, echo=show}
+# Calculate the accuracy of each class using the entries of the confusion matrix
+accplus<-confusion.matrix[1,1]/(confusion.matrix[1,1]+confusion.matrix[2,1]) 
+accneg<-confusion.matrix[2,2]/(confusion.matrix[1,2]+confusion.matrix[2,2]) 
+# Calculate the overall accuracy
+accoverall<-(confusion.matrix[1,1]+confusion.matrix[2,2])/sum(confusion.matrix)
+# note how the next section display results in the text e.g. '`r 100*accplus`% 
+
+
+#The LDA method correctly classified 100*accplus`% of the positive training data and 100*accneg`% of the negative training data. The overall training accuracy was 100*accoverall`%.
+
+
+train.pred2 <- predict(lda.fit,chemstest)$class
+confusion.matrix2<-table(train.pred2,testclass)
+
+accplus2<-confusion.matrix2[1,1]/(confusion.matrix2[1,1]+confusion.matrix2[2,1]) 
+accneg2<-confusion.matrix2[2,2]/(confusion.matrix2[1,2]+confusion.matrix2[2,2])
+accoverall2<-(confusion.matrix2[1,1]+confusion.matrix2[2,2])/sum(confusion.matrix2)
+
+100*accplus2
+100*accneg2
+100*accoverall2
+```
+
+```
+The LDA method correctly classified 
+`r 100*accplus`% of the positive training data 
+and
+`r 100*accneg`% of the negative training data. 
+The overall training accuracy
+was 
+ `r 100*accoverall`%.
+
+ 
+## 6. 2 Prediction of "chemtest.csv" Compounds
+ 
+*Provide a csv file with your predictions of the biodegradibility of each data point in chems_test.csv. Chems-R-Us will use this to independently verify the quality of your results.   These predictions should be given as a csv files with on column containing the prediction (1 or -1) for each point in chemstest.csv.  he file should be calledchems_test.csv. Upload the file  on the Coda Lab Challenge website.*
+ 
+ https://competitions.codalab.org/competitions/18751?secret_key=8e55ff40-1dfb-49e4-8543-aa9fc6905b60 
+ 
+*Indicate in your report theaccount or team name used for the test submission on the coda lab website.*
+.
+
+```{r,echo=show}
+```{r}
+unknowns <- read.csv("~/MATP-4400/data/chemstest.csv")
+unknowns <- unknowns[,-c(1,ncol(unknowns))]
+predictions <- predict(lda.fit, unknowns)$class
+num_biodegrade <- sum(predictions ==1)
+num_not<- sum(predictions==-1)
+valid <- (num_biodegrade + num_not) == nrow(unknowns)
+predictions.df<- as.data.frame(predictions)
+write_csv(predictions.df, "~/Weesnaw.csv")
+```
+
+```
+```
+
+
+```
+
+ 
+# 7.0 Additional Analysis 
+
+*Provide an additional analysis or visualizations that may be insightful to Chems-R-Us (use your imagination, extra credit for creativity here).  Discuss the insights they provide. Each team member should provide their own analysis/visualization and discussion. Be sure to title any figures.  Comment your code so all can understand what you are doing. Feel free to use any R from class or from the web.*
+
+The next 4 subsections provide the additional analysis and discussion by each team member. 
+
+## 7.1 Results of Member Name
+```{r,echo=show}
+```{r}
+chems.pca <- prcomp(chemsdata.matrix,retx=TRUE,center=FALSE, scale=FALSE)
+clust <- kmeans(chemsdata.matrix,2)
+
+plot.df <- cbind.data.frame(chems.pca$x)
+# ^^ convenient function for cbinding and then making the result a data frame
+p1<-ggplot(data=plot.df, aes(x=PC1, y=PC2, color=clust$cluster))+ geom_point()
+  coord_fixed(ratio=1)
+p1
+
+p2 <- ggplot(data=plot.df, aes(x=PC2, y=PC3, color=clust$cluster))+ geom_point()
+  coord_fixed(ratio=1)
+p2
+
+p3 <- ggplot(data=plot.df, aes(x=PC3, y=PC4, color=clust$cluster))+ geom_point()
+  coord_fixed(ratio=1)
+p3
+
+```
+
+## 7.2 Results of Member Name
+```{r,eval=F}
+```{r}
+chems.pca <- prcomp(chemsdata.matrix,retx=TRUE,center=FALSE, scale=FALSE)
+screeplot(chems.pca, type="lines",main="Chemsdata PCA Variance by Principal Component", npcs=4)
+
+```
+
+
+```
+## 7.3 Results of Member Name
+```{r,eval=F}
+
+```{r}
+pca <- prcomp(chemstrain,retx=TRUE,center=TRUE)
+km <- kmeans(chemstrain,2)
+#km
+p <- ggplot(data=as.data.frame(pca$x), aes(x=PC1, y=PC2, color=km$cluster)) + geom_point() + scale_color_gradientn(colors=rainbow(5)) + coord_fixed() + ggtitle("Components 1 & 2 of Training Data")
+p
+#Creating ggplot of 2 PCA's of the testing set
+pca2 <- prcomp(chemstest,retx=TRUE,center=TRUE)
+km2 <- kmeans(chemstest,2)
+#km
+p <- ggplot(data=as.data.frame(pca2$x), aes(x=PC1, y=PC2, color=km2$cluster)) + geom_point() + scale_color_gradientn(colors=rainbow(5)) + coord_fixed() + ggtitle("Components 1 & 2 of Testing Data")
+p
+```
+
+```
+## 7.4 Results of Member Name
+```{r,eval=F}
+# Analysis/Visualizations by Team Member 4 goes Here
+# analysing the consistency of the accuracy of the lda 
+```{r}
+set.seed(800)
+train <- sample(1:nrow(chemsdata),ss)
+chemstrain <- chemsdata[train , -1]  #The training data is just the training rows
+chemstest <- chemsdata[-train, -1 ]  
+trainclass <- chemstrain[, ncol(chemstrain)]  
+testclass <- chemstest[,ncol(chemstest)]
+trainmatrix <- as.matrix(chemstrain[ ,c(1:ncol(chemstrain)-1)])
+testmatrix <- as.matrix(chemstest[ ,c(1:ncol(chemstest)-1)])
+
+set.seed(200)
+train <- sample(1:nrow(chemsdata),ss)
+chemstrain <- chemsdata[train , -1]  #The training data is just the training rows
+chemstest <- chemsdata[-train, -1 ]  
+trainclass <- chemstrain[, ncol(chemstrain)]  
+testclass <- chemstest[,ncol(chemstest)]
+trainmatrix <- as.matrix(chemstrain[ ,c(1:ncol(chemstrain)-1)])
+testmatrix <- as.matrix(chemstest[ ,c(1:ncol(chemstest)-1)])
+
+```
+
+
+
+```
+
+# 8.0 Conclusion
+
+*Provide a conclusion which summarizes your results briefly and adds any observations/suggestions that you have for Chems-R-Us about the data, model, or future work.*
+
+
+So in conclusion, the results from our analysis shows that the Fisher LDA Method is shown to be more accurate than the Mean Method. While we could not achieve better accuracy through other methods, we can still expect our model to work correctly for most points. This is expected since we are using a linear model on a data set that we saw is not well seperated in all of its components. Our final consultation recommendation to Chems-R-Us is that they use our Fisher LDA model to predict the biodegradation of chemicals.
+
+
